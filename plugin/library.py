@@ -23,6 +23,7 @@ class Library:
         Return a list of games in this library.
         """
         games = []
+        image_dir = LibraryImageDir(Path(self.steam.path).joinpath( 'appcache', 'librarycache'))
         for appmanifest in Path(self.path).joinpath('steamapps').glob('appmanifest_*.acf'):
             try:
                 manifest = VDF(appmanifest)
@@ -45,22 +46,44 @@ class Library:
                         path=Path(self.path).joinpath(
                             manifest['AppState']['installdir']),
                         id=manifest['AppState']['appid'],
-                        image_dir=Path(self.steam.path).joinpath(
-                            'appcache', 'librarycache'),
+                        image_dir=image_dir,
                     )
                 )
         return games
 
+class LibraryImageDir:
+    """
+    Caches the filesystem access of a library image directory
+    """
+
+    def __init__(self, image_dir: Union[str, Path]):
+        image_dir = Path(image_dir)
+        self.grid = image_dir.name == 'grid'
+        self._files_cache = []
+        self._iterdir = image_dir.iterdir()
+
+    def _files(self):
+        for file in self._files_cache:
+            yield file
+        for file in self._iterdir:
+            self._files_cache.append(file)
+            yield file
+
+    def get_image(self, id: str, type: str, sep='_') -> Path:
+        if self.grid == 'grid':
+            # Grid images use short ID format
+            id = self.short_id()
+        return next((file for file in self._files() if file.name.startswith(f'{id}{sep}{type}.')), None)
 
 class LibraryItem:
     """
     Base class for all library items.
     """
 
-    def __init__(self, name: str, path: Union[str, Path], image_dir: Union[str, Path], id: str = None):
+    def __init__(self, name: str, path: Union[str, Path], image_dir: LibraryImageDir, id: str = None):
         self.name = name
         self.path = Path(path)
-        self.image_dir = Path(image_dir)
+        self.image_dir = image_dir
         self._id = id
         self._image_id = self.id
 
@@ -87,11 +110,7 @@ class LibraryItem:
         webbrowser.open(self.uri())
 
     def get_image(self, type: str, sep='_') -> Path:
-        id = self.id
-        if Path(self.image_dir).name == 'grid':
-            # Grid images use short ID format
-            id = self.short_id()
-        return next(Path(self.image_dir).glob(f'{id}{sep}{type}.*'), None)
+        return self.image_dir.get_image(self.id, type, sep)
 
     @cached_property
     def icon(self) -> Path:
